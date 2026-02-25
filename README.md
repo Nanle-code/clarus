@@ -31,7 +31,7 @@ Clarus fills a gap: **there is currently no dedicated static analysis tool for C
 ### From source
 
 ```bash
-git clone https://github.com/yourusername/clarus
+git clone https://github.com/Nanle-code/clarus.git
 cd clarus
 cargo build --release
 ```
