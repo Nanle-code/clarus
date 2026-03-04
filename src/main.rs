@@ -3,11 +3,15 @@ mod parser;
 mod analyzer;
 mod reporter;
 mod detector;
+mod loader;
+mod registry;
+mod callgraph;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use reporter::Report;
-use std::fs;
+use std::path::Path;
 use std::process;
+use colored::Colorize;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -16,59 +20,144 @@ use std::process;
     version = "0.1.0"
 )]
 struct Cli {
-    /// Path to the Clarity contract file to analyze
-    file: String,
+    #[command(subcommand)]
+    command: Commands,
+}
 
-    /// Output results as JSON
-    #[arg(long, default_value_t = false)]
-    json: bool,
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Analyze a single Clarity contract file
+    Check {
+        /// Path to the .cla file
+        file: String,
+        
+        #[arg(long, default_value_t = false)]
+        json: bool,
 
-    /// Exit with code 1 if issues are found (useful for CI/CD)
-    #[arg(long, default_value_t = false)]
-    strict: bool,
+        #[arg(long, default_value_t = false)]
+        strict: bool,
+    },
+
+    /// Analyze all Clarity contracts in a directory
+    Scan {
+        /// Path to the contracts directory
+        dir: String,
+
+        #[arg(long, default_value_t = false)]
+        json: bool,
+
+        #[arg(long, default_value_t = false)]
+        strict: bool,
+    },
 }
 
 fn main() {
     let cli = Cli::parse();
 
-    // read the contract file
-    let source = match fs::read_to_string(&cli.file) {
-        Ok(content) => content,
+    match cli.command {
+        Commands::Check { file, json, strict } => {
+            run_check(&file, json, strict);
+        }
+        Commands::Scan { dir, json, strict } => {
+            run_scan(&dir, json, strict);
+        }
+    }
+}
+
+fn run_check(file: &str, json: bool, strict: bool) {
+    let path = Path::new(file);
+
+    let contract = match loader::load_single(path) {
+        Ok(c) => c,
         Err(e) => {
-            eprintln!("Error reading file '{}': {}", cli.file, e);
+            eprintln!("Error: {}", e);
             process::exit(1);
         }
     };
 
-    // parse into AST — use full module path to avoid conflict with clap::Parser
-    let mut clarity_parser = parser::Parser::new(&source);
+    let mut clarity_parser = parser::Parser::new(&contract.source);
     let nodes = match clarity_parser.parse() {
         Ok(nodes) => nodes,
         Err(e) => {
-            eprintln!("Parse error in '{}': {}", cli.file, e);
+            eprintln!("Parse error in '{}': {}", file, e);
             process::exit(1);
         }
     };
 
-    // run reentrancy detector
     let findings = analyzer::analyze(&nodes);
     let has_findings = !findings.is_empty();
 
-    // build and print report
-    let report = Report::new(&cli.file, findings);
+    let report = Report::new(file, findings);
 
-    if cli.json {
-        report.print_json();
-    } else {
-        report.print();
-    }
+    if json { report.print_json(); } else { report.print(); }
 
-    // exit with code 1 in strict mode if issues found
-    if cli.strict && has_findings {
+    if strict && has_findings {
         process::exit(1);
     }
 }
 
+fn run_scan(dir: &str, json: bool, strict: bool) {
+    let path = Path::new(dir);
+
+    let sources = match loader::load_contracts(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            process::exit(1);
+        }
+    };
+
+    let registry = match registry::Registry::build(sources) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error building registry: {}", e);
+            process::exit(1);
+        }
+    };
+
+    println!();
+    println!("  {} {} — Clarity Smart Contract Analyzer",
+        "Clarus".bold().cyan(),
+        "v0.2.0".dimmed()
+    );
+    println!("  {} {} contracts in {}",
+        "Scanning:".dimmed(),
+        registry.len().to_string().bold(),
+        dir.bold()
+    );
+    println!("{}", "─".repeat(60).dimmed());
+
+    let mut total_findings = 0;
+    let mut has_findings = false;
+
+    for contract in registry.all() {
+        let findings = analyzer::analyze(&contract.ast);
+
+        if !findings.is_empty() {
+            has_findings = true;
+            total_findings += findings.len();
+        }
+
+        let filename = contract.source.path.to_string_lossy().to_string();
+        let report = Report::new(&filename, findings);
+
+        if json { report.print_json(); } else { report.print(); }
+    }
+
+    if !json {
+        println!();
+        println!("  {} {} total findings across {} contracts",
+            "Summary:".dimmed(),
+            total_findings.to_string().bold().red(),
+            registry.len()
+        );
+        println!();
+    }
+
+    if strict && has_findings {
+        process::exit(1);
+    }
+}
 
 
 
