@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ContractSource {
     pub name: String,      // contract name e.g. "vault"

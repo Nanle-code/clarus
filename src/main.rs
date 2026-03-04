@@ -11,7 +11,6 @@ use clap::{Parser, Subcommand};
 use reporter::Report;
 use std::path::Path;
 use std::process;
-use colored::Colorize;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -110,6 +109,7 @@ fn run_check(file: &str, json: bool, strict: bool) {
 }
 
 fn run_scan(dir: &str, json: bool, strict: bool) {
+
     let path = Path::new(dir);
 
     let sources = match loader::load_contracts(path) {
@@ -128,43 +128,17 @@ fn run_scan(dir: &str, json: bool, strict: bool) {
         }
     };
 
-    println!();
-    println!("  {} {} — Clarity Smart Contract Analyzer",
-        "Clarus".bold().cyan(),
-        "v0.2.0".dimmed()
-    );
-    println!("  {} {} contracts in {}",
-        "Scanning:".dimmed(),
-        registry.len().to_string().bold(),
-        dir.bold()
-    );
-    println!("{}", "─".repeat(60).dimmed());
+    let graph = callgraph::build(&registry);
+    let findings = analyzer::analyze_project(&registry, &graph);
+    let has_findings = !findings.is_empty();
+    let contract_count = registry.len();
 
-    let mut total_findings = 0;
-    let mut has_findings = false;
+    let report = reporter::ProjectReport::new(dir, findings, contract_count);
 
-    for contract in registry.all() {
-        let findings = analyzer::analyze(&contract.ast);
-
-        if !findings.is_empty() {
-            has_findings = true;
-            total_findings += findings.len();
-        }
-
-        let filename = contract.source.path.to_string_lossy().to_string();
-        let report = Report::new(&filename, findings);
-
-        if json { report.print_json(); } else { report.print(); }
-    }
-
-    if !json {
-        println!();
-        println!("  {} {} total findings across {} contracts",
-            "Summary:".dimmed(),
-            total_findings.to_string().bold().red(),
-            registry.len()
-        );
-        println!();
+    if json {
+        report.print_json();
+    } else {
+        report.print();
     }
 
     if strict && has_findings {

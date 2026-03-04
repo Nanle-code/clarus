@@ -3,6 +3,7 @@ use crate::ast::ClarityNode;
 use crate::parser::Parser;
 use crate::loader::ContractSource;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ParsedContract {
     pub name: String,
