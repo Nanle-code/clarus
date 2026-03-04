@@ -49,6 +49,16 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         strict: bool,
     },
+
+    /// Show the call graph for all contracts in a directory
+    Graph {
+        /// Path to the contracts directory
+        dir: String,
+
+        /// Show only cross-contract edges
+        #[arg(long, default_value_t = false)]
+        cross_only: bool,
+    }
 }
 
 fn main() {
@@ -61,6 +71,9 @@ fn main() {
         Commands::Scan { dir, json, strict } => {
             run_scan(&dir, json, strict);
         }
+        Commands::Graph { dir, cross_only} => {
+        run_graph(&dir, cross_only);
+    }
     }
 }
 
@@ -157,6 +170,99 @@ fn run_scan(dir: &str, json: bool, strict: bool) {
     if strict && has_findings {
         process::exit(1);
     }
+}
+
+
+fn run_graph(dir: &str, cross_only: bool) {
+    use colored::Colorize;
+
+    let path = Path::new(dir);
+
+    let sources = match loader::load_contracts(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            process::exit(1);
+        }
+    };
+
+    let registry = match registry::Registry::build(sources) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            process::exit(1);
+        }
+    };
+
+    let graph = callgraph::build(&registry);
+    let summary = graph.summary();
+
+    println!();
+    println!("{} {}", "Clarus".bold().cyan(), "— Call Graph".dimmed());
+    println!("{} {}", "Directory:".dimmed(), dir.bold());
+    println!("{}", "─".repeat(60).dimmed());
+    println!();
+    println!("  {}  {}", "Contracts :".dimmed(), summary.total_contracts.to_string().bold());
+    println!("  {}  {}", "Functions :".dimmed(), summary.total_functions.to_string().bold());
+    println!("  {}      {}", "Edges :".dimmed(), summary.total_edges.to_string().bold());
+    println!();
+
+    if graph.edges.is_empty() {
+        println!("  {} No cross-contract calls found", "✓".green().bold());
+        println!();
+        return;
+    }
+
+    println!("{}", "─".repeat(60).dimmed());
+    println!("  {}", "Call Edges:".bold());
+    println!();
+
+    for edge in &graph.edges {
+        // skip same-contract calls if cross_only flag is set
+        if cross_only && edge.caller_contract == edge.callee_contract {
+            continue;
+        }
+
+        let arrow = if edge.caller_contract != edge.callee_contract {
+            "──▶".bold().red().to_string()  // cross-contract call
+        } else {
+            "──▶".dimmed().to_string()       // same-contract call
+        };
+
+        println!(
+            "  {}.{}  {}  {}.{}  {}",
+            edge.caller_contract.bold().yellow(),
+            edge.caller_function.cyan(),
+            arrow,
+            edge.callee_contract.bold().yellow(),
+            edge.callee_function.cyan(),
+            format!("(line {})", edge.line).dimmed()
+        );
+    }
+
+    println!();
+
+    // warn about cycles
+    if !summary.cycles.is_empty() {
+        println!("{}", "─".repeat(60).dimmed());
+        println!("  {} {} circular call path(s) detected",
+            "⚠ WARNING:".bold().red(),
+            summary.cycles.len()
+        );
+        for cycle in &summary.cycles {
+            let path: Vec<String> = cycle.iter()
+                .map(|(c, f)| format!("{}.{}", c, f))
+                .collect();
+            println!("  {}", path.join(" → ").red());
+        }
+        println!();
+    }
+
+    println!("{}", "─".repeat(60).dimmed());
+    println!("  {} Red arrows indicate cross-contract calls",
+        "Legend:".dimmed()
+    );
+    println!();
 }
 
 
