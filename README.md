@@ -357,6 +357,11 @@ clarus/
 
 ---
 
+## Links to users testing clarus
+1.  https://www.loom.com/share/9dae2eb731c7493a97dc5c7c22de0ad4
+2.  https://www.loom.com/share/4588dcadfa2e4ce1a662f57863eaf7cb
+
+
 ## Contributing
 
 Clarus is open source and welcomes contributions. If you find a Clarity vulnerability pattern that Clarus misses, please open an issue with a minimal reproducing contract.
